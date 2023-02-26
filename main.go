@@ -1,14 +1,21 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+type bnResp struct {
+	Price float64 `json:"price, string"`
+	Code  int64   `json:"code"`
+}
 type wallet map[string]float64
 
 var db = map[int64]wallet{}
@@ -96,9 +103,14 @@ func main() {
 			case "SHOW":
 				if len(command) == 1 {
 					msg := ""
+					var sum float64 = 0
+
 					for key, value := range db[update.Message.Chat.ID] {
-						msg += fmt.Sprintf("%s: %f\n", key, value)
+						price, _ := getPrice(key)
+						sum += value * price
+						msg += fmt.Sprintf("%s: %f [%.2f]\n", key, value, value*price)
 					}
+					msg += fmt.Sprintf("Total: %.2f\n", sum)
 					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, msg))
 				} else {
 					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "неверная команда"))
@@ -111,4 +123,23 @@ func main() {
 		}
 	}
 
+}
+
+func getPrice(symbol string) (price float64, err error) {
+	resp, err := http.Get(fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%sUSDT", symbol))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	var jsonResp bnResp
+	err = json.NewDecoder(resp.Body).Decode(&jsonResp)
+	if err != nil {
+		return
+	}
+
+	if jsonResp.Code != 0 {
+		err = errors.New("неверный символ")
+	}
+	price = jsonResp.Price
+	return
 }
